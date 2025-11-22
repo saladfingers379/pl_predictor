@@ -11,6 +11,7 @@ def main():
     parser.add_argument('--all', action='store_true', help='Predict ALL future fixtures (from full schedule)')
     parser.add_argument('--backtest', action='store_true', help='Run backtest on historical data')
     parser.add_argument('--season', type=str, default='2023-2024', help='Season to backtest (e.g., 2023-2024, 23/24, or 2022-2023)')
+    parser.add_argument('--retrain-every', type=int, default=50, help='Number of matches to wait before retraining the model during backtest')
     
     args = parser.parse_args()
     
@@ -25,13 +26,33 @@ def main():
         # Define features to use
         features = [
             'Home_Rolling_GF', 'Home_Rolling_GA', 'Home_Rolling_Pts',
-            'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts'
+            'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts',
+            'Home_ELO', 'Away_ELO',
+            'Home_RestDays', 'Away_RestDays',
+            'Home_HomeForm_GF', 'Away_AwayForm_GF'
         ]
         
         print(f"Training XGBoost model with features: {features}")
         predictor = XGBoostPredictor(features=features)
-        predictor.train(train_df)
+        predictor.train(train_df, tune=True) # Enable tuning for manual training
         predictor.get_feature_importance()
+        
+        # Export Current ELO
+        print("Exporting current ELO ratings...")
+        # Get the last row for each team to get their latest ELO
+        # We need to look at both Home and Away columns
+        
+        # Create a long format of team, date, elo
+        home_elo = train_df[['Date', 'HomeTeam', 'Home_ELO']].rename(columns={'HomeTeam': 'Team', 'Home_ELO': 'ELO'})
+        away_elo = train_df[['Date', 'AwayTeam', 'Away_ELO']].rename(columns={'AwayTeam': 'Team', 'Away_ELO': 'ELO'})
+        
+        all_elo = pd.concat([home_elo, away_elo])
+        latest_elo = all_elo.sort_values('Date').groupby('Team').last().reset_index()
+        latest_elo = latest_elo[['Team', 'ELO']].sort_values('ELO', ascending=False)
+        
+        latest_elo.to_csv('data/current_elo.csv', index=False)
+        print(f"Current ELO ratings saved to data/current_elo.csv")
+        print(latest_elo.head(10))
         
     elif args.predict:
         print("Running prediction...")
@@ -46,12 +67,15 @@ def main():
         # Define features to use (same as training)
         features = [
             'Home_Rolling_GF', 'Home_Rolling_GA', 'Home_Rolling_Pts',
-            'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts'
+            'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts',
+            'Home_ELO', 'Away_ELO',
+            'Home_RestDays', 'Away_RestDays',
+            'Home_HomeForm_GF', 'Away_AwayForm_GF'
         ]
 
         from src.backtest import Backtester
         backtester = Backtester(initial_bankroll=1000, staking_method='kelly')
-        backtester.run(df, features, start_season=args.season)
+        backtester.run(df, features, start_season=args.season, retrain_every=args.retrain_every)
     else:
         parser.print_help()
 

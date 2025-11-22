@@ -2,53 +2,52 @@
 
 This project predicts Premier League match outcomes and "fair odds" using historical data and machine learning (XGBoost).
 
-## Project Structure & Usage
+## Quick Start
 
-### 1. `main.py` - The Command Center
-This is the entry point for the application. You run this file to execute different parts of the pipeline.
+### 1. Train the Model
+Train the model on all available historical data. This uses the new features (ELO, Home/Away Form) and performs hyperparameter tuning.
+```bash
+python main.py --train
+```
 
-*   **Train Model**: `python main.py --train`
-    *   Loads historical CSV data.
-    *   Calculates features (form, goals, etc.).
-    *   Trains the XGBoost model.
-    *   Outputs validation accuracy and feature importance.
-*   **Predict Fixtures**: `python main.py --predict`
-    *   Loads the trained model and predicts upcoming games (next ~20 matches).
-    *   Use `--all` to predict **ALL** future fixtures from the full schedule.
-    *   Outputs "Fair Odds" and probabilities to `data/predictions.csv`.
-*   **Backtest**: `python main.py --backtest`
-    *   Simulates betting on past seasons (e.g., 2023/24).
-    *   Calculates ROI, Profit, and Win Rate.
-    *   **Visualizes** bankroll performance over time (graph).
+### 2. Run a Backtest
+Simulate how the model would have performed in a past season.
+```bash
+# Backtest the 2023-2024 season
+python main.py --backtest --season 2023-2024
 
-### 2. `src/fixture_fetcher.py` - Data Sourcing
-*   **Purpose**: Gets the schedule and current bookmaker odds.
-*   **Run**: `python src/fixture_fetcher.py`
-*   **Output**:
-    *   `data/latest_odds.csv`: Upcoming matches with Betfair Exchange odds (from The Odds API).
-    *   `data/fixtures.csv`: Full 2025/26 season schedule (scraped).
+# Backtest with more frequent retraining (every 10 games)
+python main.py --backtest --season 2023-2024 --retrain-every 10
+```
 
-### 3. `src/data_loader.py` - Data Ingestion
-*   **Purpose**: Reads the raw CSV files from `Historical_data_from_football_dot_co_dot_uk/`.
-*   **Key Function**: `load_historical_data()`
-    *   Combines all season files into one DataFrame.
-    *   Cleans column names (removes whitespace).
-    *   Standardizes team names.
+### 3. Predict Upcoming Fixtures
+Predict the outcomes of future matches.
+```bash
+# Predict the next batch of fixtures
+python main.py --predict
 
-### 4. `src/feature_engineering.py` - Feature Creation
-*   **Purpose**: Transforms raw match results into predictive features.
-*   **Key Function**: `prepare_training_data()`
-    *   Calculates **Rolling Stats** (last 5 games): Goals For, Goals Against, Points.
-    *   **Future Predictions**: For games far in the future, the model assumes "Current Form" persists (stats are forward-filled).
-    *   Creates the final dataset used by XGBoost.
-    *   Target: `Home Win (0)`, `Draw (1)`, `Away Win (2)`.
+# Predict ALL future fixtures in the schedule
+python main.py --predict --all
+```
 
-### 5. `src/models.py` - Machine Learning
-*   **Purpose**: Defines the XGBoost model wrapper.
-*   **Key Class**: `XGBoostPredictor`
-    *   `train(df)`: Trains the model.
-    *   `predict_proba(df)`: Returns probabilities (e.g., Home: 0.45, Draw: 0.25, Away: 0.30).
-    *   `get_feature_importance()`: Visualizes which stats matter most (e.g., "Away Form" vs "Home Goals").
+## Features
+- **Dynamic ELO**: Teams have an ELO rating that updates after every match.
+- **Home/Away Form**: Separate rolling statistics for home and away performance.
+- **Rest Days**: Accounts for fatigue by tracking days since the last match.
+- **Rolling Backtesting**: The model retrains periodically during backtesting to simulate real-world conditions.
+- **Hyperparameter Tuning**: Automatically finds the best model parameters using `RandomizedSearchCV`.
+
+## Project Structure
+
+### `main.py`
+The CLI entry point. Handles argument parsing and orchestrates the pipeline.
+
+### `src/`
+- **`feature_engineering.py`**: Calculates ELO, rolling stats, and rest days.
+- **`models.py`**: Contains the `XGBoostPredictor` with tuning and training logic.
+- **`backtest.py`**: The backtesting engine that simulates betting and calculates ROI, Sharpe Ratio, and Drawdown.
+- **`fixture_fetcher.py`**: Fetches latest odds and schedule from APIs.
+- **`data_loader.py`**: Loads and cleans historical CSV data.
 
 ## Setup
 1.  Install dependencies: `pip install -r requirements.txt`
