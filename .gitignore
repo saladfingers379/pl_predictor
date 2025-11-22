@@ -1,0 +1,59 @@
+# Byte-compiled Python 
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Python tools
+.mypy_cache/
+.pytest_cache/
+.coverage
+
+# Media / data (you decide what belongs here)
+data/
+datasets/
+videos/
+*.mp4
+*.mov
+
+# Machine learning artefacts
+checkpoints/
+weights/
+models/
+*.ckpt
+*.pt
+*.pth
+
+# Logs
+logs/
+*.log
+
+# Environment/config secrets
+.env
+*.key
+*.pem
+
+# WSL quirks (optional)
+*.swp
+*.swo
+.claude
