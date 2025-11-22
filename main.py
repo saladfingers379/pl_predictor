@@ -10,6 +10,7 @@ def main():
     parser.add_argument('--predict', action='store_true', help='Predict upcoming fixtures')
     parser.add_argument('--all', action='store_true', help='Predict ALL future fixtures (from full schedule)')
     parser.add_argument('--backtest', action='store_true', help='Run backtest on historical data')
+    parser.add_argument('--season', type=str, default='2023-2024', help='Season to backtest (e.g., 2023-2024, 23/24, or 2022-2023)')
     
     args = parser.parse_args()
     
@@ -39,18 +40,18 @@ def main():
         # We need to add the argument to parser first
         predict_upcoming_fixtures(use_full_schedule=args.all)
     elif args.backtest:
-        print("Running backtest...")
+        print(f"Running backtest for season {args.season}...")
         df = load_historical_data('Historical_data_from_football_dot_co_dot_uk')
-        
+
         # Define features to use (same as training)
         features = [
             'Home_Rolling_GF', 'Home_Rolling_GA', 'Home_Rolling_Pts',
             'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts'
         ]
-        
+
         from src.backtest import Backtester
-        backtester = Backtester()
-        backtester.run(df, features)
+        backtester = Backtester(initial_bankroll=1000, staking_method='kelly')
+        backtester.run(df, features, start_season=args.season)
     else:
         parser.print_help()
 
