@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+from sklearn.calibration import calibration_curve
 from src.models import XGBoostPredictor, ElasticNetPredictor, EnsemblePredictor
 from src.feature_engineering import prepare_training_data
 
@@ -40,6 +43,9 @@ class Backtester:
         print("=" * 70)
 
         all_season_results = []
+        all_season_predictions = []
+        all_continuous_history = []
+        cumulative_profit_offset = 0
 
         for season in seasons:
             print(f"\n{'='*70}")
@@ -51,19 +57,85 @@ class Backtester:
             self.history = []
 
             # Run single season backtest
-            season_results = self.run(df, features, start_season=season, retrain_every=retrain_every, silent=False)
+            season_results, season_preds = self.run(df, features, start_season=season, retrain_every=retrain_every, silent=False, return_preds=True)
 
             if season_results:
                 season_results['season'] = season
                 all_season_results.append(season_results)
+                all_season_predictions.append(season_preds)
+                
+                # Capture history for cumulative plot
+                if self.history:
+                    season_hist_df = pd.DataFrame(self.history)
+                    # Calculate profit for this season
+                    season_hist_df['Profit'] = season_hist_df['Balance'] - self.initial_bankroll
+                    
+                    # Add offset from previous seasons to make it continuous
+                    season_hist_df['Continuous_Balance'] = season_hist_df['Profit'] + cumulative_profit_offset
+                    
+                    all_continuous_history.append(season_hist_df[['Date', 'Continuous_Balance']].rename(columns={'Continuous_Balance': 'Balance'}))
+                    
+                    # Update offset for next season
+                    final_season_profit = season_hist_df['Profit'].iloc[-1]
+                    cumulative_profit_offset += final_season_profit
 
         # Aggregate results across all seasons
         if all_season_results:
             self._print_aggregate_results(all_season_results)
+            
+            # Plot aggregated calibration curve
+            if all_season_predictions:
+                combined_preds = pd.concat(all_season_predictions)
+                self.plot_calibration(combined_preds, title_suffix="_All_Seasons")
+                
+            # Plot cumulative balance/profit curve
+            if all_continuous_history:
+                combined_history = pd.concat(all_continuous_history).sort_values('Date')
+                self.plot_balance(combined_history, title_suffix="_All_Seasons_Cumulative", ylabel="Cumulative Profit ($)")
 
         return all_season_results
 
-    def run(self, df, features, start_season='2023-2024', retrain_every=50, silent=False):
+    def plot_calibration(self, df, title_suffix=""):
+        """
+        Plots calibration curves (reliability diagrams) for Home, Draw, and Away predictions.
+        """
+        plt.figure(figsize=(10, 10))
+        plt.plot([0, 1], [0, 1], "k:", label="Perfectly Calibrated")
+
+        # Define outcomes and their probability columns
+        outcomes = [
+            ('Home', 'H', 'Prob_Home'),
+            ('Draw', 'D', 'Prob_Draw'),
+            ('Away', 'A', 'Prob_Away')
+        ]
+
+        for name, ftr_code, prob_col in outcomes:
+            if prob_col not in df.columns:
+                continue
+                
+            y_true = (df['FTR'] == ftr_code).astype(int)
+            y_prob = df[prob_col]
+            
+            prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=10, strategy='uniform')
+            
+            plt.plot(prob_pred, prob_true, marker='o', label=f"{name} (bins=10)")
+
+        plt.xlabel("Mean Predicted Probability")
+        plt.ylabel("Fraction of Positives")
+        plt.title(f"Calibration Curve (Reliability Diagram) {title_suffix}")
+        plt.legend(loc="lower right")
+        plt.grid(True, alpha=0.3)
+        
+        # Ensure directory exists
+        output_dir = os.path.join('data', 'calibration_curves')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        output_path = os.path.join(output_dir, f'calibration_curve{title_suffix.replace(" ", "_")}.png')
+        plt.savefig(output_path)
+        print(f"Calibration curve saved to {output_path}")
+        plt.close()
+
+    def run(self, df, features, start_season='2023-2024', retrain_every=50, silent=False, return_preds=False):
         """
         Runs a walk-forward backtest for a single season.
         Trains on all data prior to a match week, predicts that week, and tracks P&L.
@@ -74,9 +146,10 @@ class Backtester:
             start_season (str): Season to start backtesting from (e.g., '2023-2024', '23/24', '2022-2023')
             retrain_every (int): Number of matches to wait before retraining the model.
             silent (bool): If True, suppresses some output (for multi-season runs)
+            return_preds (bool): If True, returns (summary_dict, predictions_df) tuple.
 
         Returns:
-            dict: Backtest results summary
+            dict: Backtest results summary (or tuple if return_preds=True)
         """
         # Ensure data is sorted by date
         df = df.sort_values('Date').reset_index(drop=True)
@@ -129,7 +202,9 @@ class Backtester:
             print("Warning: No training data available before this season. Model will be untrained initially.")
             # This might crash XGBoost if we try to fit empty data.
             # In this case, we might need to skip training or fail.
-            return
+            if return_preds:
+                return None, None
+            return None
 
         predictor.train(train_data)
         
@@ -161,6 +236,15 @@ class Backtester:
 
         # Simulate Betting (Value Betting Strategy)
         backtest_results = self.simulate_betting(results)
+
+        # Plot Calibration for this single run
+        self.plot_calibration(results, title_suffix=f"_{start_season}")
+        
+        # Plot Balance for this single run
+        self.plot_balance(title_suffix=f"_{start_season}")
+
+        if return_preds:
+            return backtest_results, results
 
         return backtest_results
         
@@ -309,9 +393,6 @@ class Backtester:
 
         print("=" * 60)
 
-        # Plotting
-        self.plot_balance()
-
         # Return results dictionary
         return {
             'initial_bankroll': self.initial_bankroll,
@@ -370,43 +451,51 @@ class Backtester:
 
         print("=" * 70)
 
-    def plot_balance(self):
+    def plot_balance(self, df=None, title_suffix="", ylabel="Balance ($)"):
         """
-        Plots the bankroll balance over time.
+        Plots the bankroll balance (or cumulative profit) over time.
         """
-        if not self.history:
-            print("No betting history to plot.")
-            return
+        if df is None:
+            if not self.history:
+                return
+            history_df = pd.DataFrame(self.history)
+            # Group by date to get end-of-day balance
+            daily_balance = history_df.groupby('Date')['Balance'].last().reset_index()
 
-        history_df = pd.DataFrame(self.history)
-        # Group by date to get end-of-day balance
-        daily_balance = history_df.groupby('Date')['Balance'].last().reset_index()
-
-        # Add initial bankroll at the start of the backtest period
-        first_date = daily_balance['Date'].min()
-        initial_row = pd.DataFrame({'Date': [first_date], 'Balance': [self.initial_bankroll]})
-        daily_balance = pd.concat([initial_row, daily_balance], ignore_index=True)
-        daily_balance = daily_balance.sort_values('Date').reset_index(drop=True)
+            # Add initial bankroll at the start of the backtest period
+            first_date = daily_balance['Date'].min()
+            if pd.isna(first_date): return
+            initial_row = pd.DataFrame({'Date': [first_date], 'Balance': [self.initial_bankroll]})
+            daily_balance = pd.concat([initial_row, daily_balance], ignore_index=True)
+            daily_balance = daily_balance.sort_values('Date').reset_index(drop=True)
+            baseline = self.initial_bankroll
+        else:
+            daily_balance = df
+            baseline = 0 # For cumulative profit plots, baseline is usually 0
 
         import matplotlib.pyplot as plt
 
         plt.figure(figsize=(12, 6))
         plt.plot(daily_balance['Date'], daily_balance['Balance'], marker='o', markersize=3, linewidth=1.5)
-        plt.title('Bankroll Over Time')
+        plt.title(f'Performance Over Time {title_suffix}'.replace('_', ' '))
         plt.xlabel('Date')
-        plt.ylabel('Balance ($)')
+        plt.ylabel(ylabel)
         plt.grid(True, alpha=0.3)
-        plt.axhline(y=self.initial_bankroll, color='r', linestyle='--', alpha=0.7, label='Initial Bankroll')
+        plt.axhline(y=baseline, color='r', linestyle='--', alpha=0.7, label='Baseline')
 
         # Set x-axis limits to only show the actual backtest period
-        plt.xlim(daily_balance['Date'].min(), daily_balance['Date'].max())
+        if not daily_balance.empty:
+            plt.xlim(daily_balance['Date'].min(), daily_balance['Date'].max())
 
         plt.legend()
         plt.tight_layout()
         
-        # Save plot
-        output_path = 'data/backtest_results.png'
+        # Ensure directory exists
+        output_dir = os.path.join('data', 'backtest_results')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        output_path = os.path.join(output_dir, f'backtest{title_suffix}.png')
         plt.savefig(output_path)
-        print(f"Balance plot saved to {output_path}")
-        # plt.show() # Optional: keep if running locally, but saving is safer for headless
+        print(f"Performance plot saved to {output_path}")
+        plt.close()
 
