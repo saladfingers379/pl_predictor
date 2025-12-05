@@ -56,4 +56,5 @@ logs/
 # WSL quirks (optional)
 *.swp
 *.swo
+
 .claude

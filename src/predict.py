@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from src.models import XGBoostPredictor
+from src.models import XGBoostPredictor, ElasticNetPredictor, EnsemblePredictor
 from src.feature_engineering import prepare_training_data
 from src.data_loader import load_historical_data
 
@@ -29,9 +28,10 @@ def standardize_team_names(df):
 
     return df
 
-def predict_upcoming_fixtures(historical_data_path='Historical_data_from_football_dot_co_dot_uk', 
+def predict_upcoming_fixtures(historical_data_path='Historical_data_from_football_dot_co_dot_uk',
                               fixtures_path='data/latest_odds.csv',
-                              use_full_schedule=False):
+                              use_full_schedule=False,
+                              model_type='ensemble'):
     """
     Trains the model on all historical data and predicts upcoming fixtures.
     """
@@ -106,13 +106,26 @@ def predict_upcoming_fixtures(historical_data_path='Historical_data_from_footbal
         return
 
     # 6. Train Model
-    print(f"Training model on {len(train_df)} historical matches...")
+    print(f"Training {model_type} model on {len(train_df)} historical matches...")
+    # CRITICAL: These features must match the features used in main.py training
     features = [
         'Home_Rolling_GF', 'Home_Rolling_GA', 'Home_Rolling_Pts',
-        'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts'
+        'Away_Rolling_GF', 'Away_Rolling_GA', 'Away_Rolling_Pts',
+        'Home_ELO', 'Away_ELO',
+        'Home_RestDays', 'Away_RestDays',
+        'Home_HomeForm_GF', 'Away_AwayForm_GF'
     ]
-    
-    predictor = XGBoostPredictor(features=features)
+
+    # Select model based on type
+    if model_type == 'xgboost':
+        predictor = XGBoostPredictor(features=features)
+    elif model_type == 'elasticnet':
+        predictor = ElasticNetPredictor(features=features)
+    elif model_type == 'ensemble':
+        predictor = EnsemblePredictor(features=features)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+
     predictor.train(train_df)
     
     # 7. Predict
